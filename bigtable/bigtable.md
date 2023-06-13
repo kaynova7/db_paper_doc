@@ -106,7 +106,7 @@ BigTable 在名称上具有一定的迷惑性，（直译：大表），第一�
 
 按照表的概念举例一些数据：
 
-![](/Users/charlotte/go/src/db_paper_doc/bigtable/image/image-bigtable-demo.png)
+![](./image/image-bigtable-demo.png)
 
 anchor、contents、people 为三个列簇，我们可以根据 `rowkey + colkey + ts` 定位到一个具体的 value，如：`com.cnn.www + anchor:cnnsi.com + t9` 定位到 `CNN` 
 
