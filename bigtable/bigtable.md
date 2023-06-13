@@ -424,7 +424,7 @@ Bigtable 数据访问结构如下图所示。如果客户端不知道子表的�
 
 
 
-## Refifinements
+## Refinements
 
 ### Locality Groups
 
