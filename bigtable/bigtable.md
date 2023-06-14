@@ -504,5 +504,105 @@ Bigtable 数据访问结构如下图所示。如果客户端不知道子表的�
 
 
 
+## Performance Evaluation
+
+![image-20200805101436235](https://spongecaptain.cool/images/img_paper/image-20200805101436235.png)
 
 
+
+左表中数值的含义是每一台 Table Server 上 1000-byte 读或写操作 在一秒中发生的次数（平均负载）：
+
+- 横向来看：随着 Tablet Server 数量的增多，每一台机器的负载都有所下降。
+
+- 纵向来看：扫描 > 内存中的随机读 > 随机写 ≈ 顺序写 > 顺序读 > 随机读；
+
+  > 顺序写和随机写有着近似的效率，这是因为来自客户端的写操作并不会直接导致在磁盘中进行写操作，而是仅仅写入内存。
+
+右图中纵坐标含义为整个系统发生的 1000-byte 读或写操作在一秒中发生的次数（系统负载）：
+
+- 横向来看：随着机器数量的上升，各项指标也会随之上升。但是注意，随着机器数达到 250 台，上升的速率均会下降；
+- 纵向来看：扫描 > 内存中的随机读 > 随机写 ≈ 顺序写 ≈ 顺序读 > 随机读；
+
+
+
+## Bigtable 设计的” 得” 与” 失”
+
+**1.Non-SQL 接口**
+
+提供自定义的数据读写接口而非用户已习惯的 SQL 接口，会带来额外的学习成本。
+
+MegaStore 论文中关于 Bigtable 的评价：
+
+> Even though many projects happily use Bigtable, we have also consistently received complaints from users that Bigtable can be difficult to use for some kinds of applications: those that have complex, evolving schemas, or those that want strong consistency in the presence of wide-area replication.
+
+**2.Master-Slave 架构**
+
+关于该架构的优劣已经存在很多的探讨，这里不赘述。
+
+**3.Schema Less**
+
+Bigtable 本是为结构化数据存储而设计的，却采用了 Schema Less 的设计。论文中提及的关于网页数据存储的场景，应该是促成该设计的最大因素。另一方面，可以猜测，**Schema 变更在 Google 内部是经常发生的**。所以，最后选定了 SSTable (在 Google 内部先于 Bigtable 而出现) 作为底层的文件存储格式。
+
+**该设计的优势在于能够支持 Schema 的灵活变更，不需要预先定义 Schema 信息。**
+
+但该设计的缺点也非常明显：
+
+- Key-Value 中携带了充分的自我描述信息，导致数据有大量的膨胀。
+- 在数据压缩粒度上比较受限。
+
+**4.Range 分区**
+
+优点：
+
+- Range 分区能够很好的保证数据在底层存储上与 Row Key 的顺序是一致的，对 Scan 类型查询比较友好。
+
+缺点：
+
+- 对用户 Row Key 的设计提出了非常高的要求。
+- 容易导致数据不均匀。
+
+**5.事务支持**
+
+Bigtable 论文中提到仅需要支持单行事务的设计初衷：
+
+> We initially planned to support general-purpose transactions in our API. Because we did not have an immediate use for them, however, we did not implement them. Now that we have many real applications running on Bigtable, we have been able to examine their actual needs, and have discovered that most applications require only single-row transactions.
+
+正是在 General-purpose Transaction 的驱使下，产生了后来的 MegaStore 以及 Spanner。Jeff Dean 在 2016 年的采访中表示没有在 Bigtable 中支持分布式事务是最大的一个设计遗憾：
+
+> “What is your biggest mistake as an engineer?”
+>
+> Not putting distributed transactions in BigTable. If you wanted to update more than one row you had to roll your own transaction protocol. It wasn’t put in because it would have complicated the system design. In retrospect lots of teams wanted that capability and built their own with different degrees of success. We should have implemented transactions in the core system. It would have been useful internally as well. Spanner fixed this problem by adding transactions. — Jeff Dean, March 7th, 2016
+
+从业界已广泛应用的 HBase 的应用场景来看，单行级别的事务还是可以满足大多数场景的，也正因为放弃了对复杂事务的支持，Bigtable/HBase 才能够取得吞吐量以及并发上的优势，正如上述观点中提到的，Bigtable 不加入分布式事务是不希望系统变得复杂。
+
+Jeff Dean 将 Bigtable 不支持分布式事务视作是一大设计遗憾，相信该观点只是针对 Google 内部的应用场景需求而言，HBase 的广泛应用恰恰佐证了 Bigtable 的这一取舍是一条正确的路。就像当年 Cassandra 因最终一致性的设计惨遭 Facebook 内部遗弃，但后来在 DataStax 的扶持下依然得到了大量用户的追捧。Google/Facebook 内部场景的特殊性，以及在这种场景下所产生的技术与观点，在很多时候并不具有普适性的。
+
+**6.计算与存储分离**
+
+Tablet Server 中仅仅提供了数据读写服务入口，但并不存储任何数据，数据文件交由底层的 GFS/Colossus 来存储，可以说，这是一个典型的计算与存储分离的架构。
+
+该架构优点：
+
+- 分层设计，每一层更专注于自身的业务能力。
+- Tablet 在 Tablet Server 之间迁移时，不需要移动底层的数据文件。
+- Tablet Server 故障不会导致数据丢失问题。
+- 可更充分的利用每一层的资源，降低整体的成本。
+- 更适合云上服务架构模型。
+
+缺点：
+
+- 更多的网络开销。
+
+**7.可用性**
+
+存储于底层 GFS 中的文件有多个副本，但 Tablet 本身却是单副本的，当 Tablet Server 故障或因负载均衡原因对 Tablet 进行迁移时，就会导致 Tablet 短暂不能提供读写服务，带来可用性问题。
+
+
+
+
+
+## Ref:
+
+https://spongecaptain.cool/post/paper/bigtable/
+
+https://hardcore.feishu.cn/docs/doccnY21HwJO8LckMKEGMTzvm2g#
