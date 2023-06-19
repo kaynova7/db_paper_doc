@@ -645,3 +645,10 @@ GFS 服务器会生成 diagnostic(诊断)日志，记录一些比较重要的事
 
 
 
+
+
+## Ref
+
+https://spongecaptain.cool/post/paper/googlefilesystem/
+
+https://nxwz51a5wp.feishu.cn/docs/doccnNYeo3oXj6cWohseo6yB4id#
